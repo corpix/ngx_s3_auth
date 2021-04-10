@@ -3,6 +3,7 @@
 /.config
 /.cache
 /.local
+/nix.store
 /run
 /log
 /cache
