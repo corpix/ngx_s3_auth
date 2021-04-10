@@ -1,7 +1,6 @@
 let nixpkgs = ./nix/nixpkgs.nix;
     config = {};
 in with import nixpkgs { inherit config; };
-with builtins;
 with lib;
 let
   shellWrapper = writeScript "shell-wrapper" ''
@@ -23,6 +22,21 @@ let
 
   nginx = pkgs.callPackage ./nix/nginx.nix {};
 
+  buildInputInclude = lib.concatMapStringsSep
+    " -I" (p: "${p.dev}/include/")
+    [openssl zlib pcre libxml2 libxslt gd];
+
+  nginxInclude = lib.concatMapStringsSep
+    " -I" (p: "${nginx}/include/${p}/")
+    ["src/os/unix"
+     "src/core"
+     "src/http"
+     "src/http/v2"
+     "src/http/modules"
+     "src/event"
+     "objs"
+    ];
+
   shellHook = ''
     export root=$(pwd)
 
@@ -33,8 +47,7 @@ let
 
     export LANG="en_US.UTF-8"
     export NIX_PATH="nixpkgs=${nixpkgs}"
-    export CFLAGS="-I${cmocka}/include/ -I${lib.concatMapStringsSep " -I" (p: "${p.dev}/include/") [openssl zlib pcre libxml2 libxslt gd]}"
-    export NGX_PATH="${nginx}/include"
+    export CFLAGS="-g -I${cmocka}/include/ -I${buildInputInclude} -I${nginxInclude} -I$root/"
     export MAKEFLAGS="--no-print-directory"
 
     if [ ! -z "$PS1" ]
@@ -53,6 +66,7 @@ in stdenv.mkDerivation rec {
     exa ripgrep
     gcc valgrind cmocka
 
+    minio s3cmd
     nginx
   ];
 

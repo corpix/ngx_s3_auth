@@ -3,6 +3,9 @@
 /.config
 /.cache
 /.local
+/run
+/log
+/cache
 /result
 /nix/result
 .personal.*
