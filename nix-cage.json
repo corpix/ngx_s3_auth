@@ -1,0 +1,35 @@
+{
+    "mode": "replace",
+    "mounts": {
+        "rw": [
+            ".",
+            "~/.emacs.d",
+            "/tmp",
+	    ["./.cache",  "~/.cache", "d"],
+	    ["./.config", "~/.config", "d"],
+	    ["./.local",  "~/.local", "d"]
+        ],
+        "ro": ["/", "~/.gitconfig"],
+        "dev": [ "/dev" ],
+        "tmpfs": [
+            "/home",
+	    "/run/user",
+	    "/run/user/$UID"
+        ]
+    },
+    "environment": {
+        "HOME": "$HOME",
+        "TERM": "xterm-256color",
+        "NIX_REMOTE": "daemon"
+    },
+    "arguments": {
+        "bwrap": [
+            "--die-with-parent",
+            "--unshare-ipc",
+            "--unshare-cgroup",
+            "--unshare-uts",
+            "--hostname",
+            "localhost"
+        ]
+    }
+}

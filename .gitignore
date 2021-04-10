@@ -1,2 +1,8 @@
-/.cmocka_build
-/test_suite
+/test
+/.tmux
+/.config
+/.cache
+/.local
+/result
+/nix/result
+.personal.*

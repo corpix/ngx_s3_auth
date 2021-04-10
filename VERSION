@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 3.0.0
+Get rid of AWS in name, use just S3.
+Make module more friendly for S3 services from other providers.
+Replace bucket with endpoint parameter.
+
 ## Version 2.0.0
 Move to AWS V4 signatures
 

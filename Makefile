@@ -1,41 +1,82 @@
-CC ?= gcc
-CFLAGS=-g -I${NGX_PATH}/src/os/unix -I${NGX_PATH}/src/core -I${NGX_PATH}/src/http -I${NGX_PATH}/src/http/modules -I${NGX_PATH}/src/event -I${NGX_PATH}/objs/ -I.
+CC       ?= gcc
+NGX_PATH ?= $(PWD)
+
+cflags :=                              \
+	-g                             \
+	$(CFLAGS)                      \
+	-I$(NGX_PATH)/src/os/unix      \
+	-I$(NGX_PATH)/src/core         \
+	-I$(NGX_PATH)/src/http         \
+	-I$(NGX_PATH)/src/http/v2      \
+	-I$(NGX_PATH)/src/http/modules \
+	-I$(NGX_PATH)/src/event        \
+	-I$(NGX_PATH)/objs/            \
+	-I.
+
+.DEFAULT_GOAL := all
+
+tmux         := tmux -2 -f $(root)/.tmux.conf -S $(root)/.tmux
+tmux_session := $(name)
+
+, = ,
+
+define fail
+{ echo "error: "$(1) 1>&2; exit 1; }
+endef
+
+## targets
+
+.PHONY: all
+all: # test, check and build all cmds
+
+.PHONY: test
+test: # compile & run tests
+	gcc ./ngx_http_s3_auth_test.c $(cflags) -o ./$@
+	./$@
 
 
-all:
+.PHONY: help
+help: # print defined targets and their comments
+	@grep -Po '^[a-zA-Z%_/\-\s]+:+(\s.*$$|$$)' Makefile \
+		| sort                                      \
+		| sed 's|:.*#|#|;s|#\s*|#|'                 \
+		| column -t -s '#' -o ' | '
 
-%.o: %.c
-	$(CC) -c -o $@ $< $(CFLAGS)
+### releases
 
-.PHONY: all clean test nginx prepare-travis-env
+.PHONY: nix/repl
+nix/repl: # start nix repl with current nixpkgs as a context
+	nix repl '<nixpkgs>'
 
+.PHONY: run/shell
+run/shell: # enter development environment with nix-shell
+	nix-shell
 
-NGX_PATH := $(shell echo `pwd`/nginx)
+.PHONY: run/cage/shell
+run/cage/shell: # enter sandboxed development environment with nix-cage
+	nix-cage
 
-prepare-travis-env:
-	wget --no-verbose https://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz
-	tar -xzf nginx-${NGINX_VERSION}.tar.gz
-	ln -s nginx-${NGINX_VERSION} ${NGX_PATH}
-	cd ${NGX_PATH} && ./configure --with-http_ssl_module --with-cc=$(CC) --add-module=${TRAVIS_BUILD_DIR}
+.PHONY: run/tmux/session
+run/tmux/session: # start development environment
+	@$(tmux) has-session    -t $(tmux_session) && $(call fail,tmux session $(tmux_session) already exists$(,) use: '$(tmux) attach-session -t $(tmux_session)' to attach) || true
+	@$(tmux) new-session    -s $(tmux_session) -n console -d
+	@$(tmux) select-window  -t $(tmux_session):0
 
-nginx:
-	cd ${NGX_PATH} && rm -rf ${NGX_PATH}/objs/src/core/nginx.o && make
+	@if [ -f $(root)/.personal.tmux.conf ]; then             \
+		$(tmux) source-file $(root)/.personal.tmux.conf; \
+	fi
 
-vendor/cmocka:
-	git submodule init && git submodule update
+	@$(tmux) attach-session -t $(tmux_session)
 
-.cmocka_build: vendor/cmocka
-	mkdir .cmocka_build && cd .cmocka_build \
-	&& cmake -DCMAKE_C_COMPILER=$(CC) -DCMAKE_MAKE_PROGRAM=make ../vendor/cmocka \
-	&& make && sudo make install
+.PHONY: run/tmux/attach
+run/tmux/attach: # attach to development session if running
+	@$(tmux) attach-session -t $(tmux_session)
 
-test: .cmocka_build | nginx
-	strip -N main -o ${NGX_PATH}/objs/src/core/nginx_without_main.o ${NGX_PATH}/objs/src/core/nginx.o \
-	&& mv ${NGX_PATH}/objs/src/core/nginx_without_main.o ${NGX_PATH}/objs/src/core/nginx.o \
-	&& $(CC) test_suite.c $(CFLAGS) -o test_suite -lcmocka `find ${NGX_PATH}/objs -name \*.o` -ldl -lpthread -lcrypt -lssl -lpcre -lcrypto -lz \
-	&& ./test_suite
+.PHONY: run/tmux/kill
+run/tmux/kill: # kill development environment
+	@$(tmux) kill-session -t $(tmux_session)
 
-clean:
-	rm -f *.o test_suite
-
-# vim: ft=make ts=8 sw=8 noet
+.PHONY: clean
+clean:: # clean stored state
+	rm -rf result*
+	rm -rf build
