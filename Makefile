@@ -21,8 +21,8 @@ build: # build nginx with module attached with nix
 
 .PHONY: test
 test: # compile & run tests
-	gcc ./ngx_http_s3_auth_test.c $(CFLAGS) -o ./$@
-	./$@
+	gcc $(CFLAGS) ./ngx_http_s3_auth_test.c -o ./ngx_http_s3_auth_test $(LDFLAGS)
+	./ngx_http_s3_auth_test
 
 
 .PHONY: help

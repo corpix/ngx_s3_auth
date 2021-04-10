@@ -9,6 +9,7 @@ with pkgs;
     mv $out/sbin $out/bin
     mkdir -p $out/include/{src,objs}
     cp -r ./src $out/include
-    cp ./objs/*.{h,c} $out/include/objs
+    cp -r ./objs/* $out/include/objs
+    strip -N main -o $out/include/objs/src/core/ngx_nginx.o $out/include/objs/src/core/nginx.o
   '';
 })

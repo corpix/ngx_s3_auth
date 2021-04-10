@@ -51,8 +51,8 @@ struct S3SignedRequestDetails {
 
 static const ngx_str_t EMPTY_STRING_SHA256 = ngx_string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 static const ngx_str_t EMPTY_STRING = ngx_null_string;
-static const ngx_str_t AMZ_HASH_HEADER = ngx_string("x-amz-content-sha256");
-static const ngx_str_t AMZ_DATE_HEADER = ngx_string("x-amz-date");
+static const ngx_str_t HASH_HEADER = ngx_string("x-amz-content-sha256");
+static const ngx_str_t DATE_HEADER = ngx_string("x-amz-date");
 static const ngx_str_t HOST_HEADER = ngx_string("host");
 static const ngx_str_t AUTHZ_HEADER = ngx_string("Authorization");
 
@@ -173,7 +173,7 @@ static inline const ngx_str_t* ngx_s3_auth__canonize_query_string(ngx_pool_t *po
 
 static inline struct S3CanonicalHeaderDetails ngx_s3_auth__canonize_headers(ngx_pool_t *pool,
                                                                             const ngx_http_request_t *req,
-                                                                            const ngx_str_t *amz_date,
+                                                                            const ngx_str_t *date,
                                                                             const ngx_str_t *content_hash,
                                                                             const ngx_str_t *s3_endpoint) {
   size_t header_names_size = 1, header_nameval_size = 1;
@@ -185,12 +185,12 @@ static inline struct S3CanonicalHeaderDetails ngx_s3_auth__canonize_headers(ngx_
   header_pair_t *header_ptr;
 
   header_ptr = ngx_array_push(settable_header_array);
-  header_ptr->key = AMZ_HASH_HEADER;
+  header_ptr->key = HASH_HEADER;
   header_ptr->value = *content_hash;
 
   header_ptr = ngx_array_push(settable_header_array);
-  header_ptr->key = AMZ_DATE_HEADER;
-  header_ptr->value = *amz_date;
+  header_ptr->key = DATE_HEADER;
+  header_ptr->value = *date;
 
   header_ptr = ngx_array_push(settable_header_array);
   header_ptr->key = HOST_HEADER;
@@ -202,17 +202,21 @@ static inline struct S3CanonicalHeaderDetails ngx_s3_auth__canonize_headers(ngx_
     "%V",
     s3_endpoint) - header_ptr->value.data;
 
-  ngx_qsort(settable_header_array->elts, (size_t) settable_header_array->nelts,
-            sizeof(header_pair_t), ngx_s3_auth__cmp_hnames);
+  ngx_qsort(
+    settable_header_array->elts,
+    (size_t) settable_header_array->nelts,
+    sizeof(header_pair_t),
+    ngx_s3_auth__cmp_hnames);
   header_details.header_list = settable_header_array;
 
   for(i = 0; i < settable_header_array->nelts; i++) {
-    header_names_size += ((header_pair_t*) settable_header_array->elts)[i].key.len + 1;
-    header_nameval_size += ((header_pair_t*) settable_header_array->elts)[i].key.len + 1;
-    header_nameval_size += ((header_pair_t*) settable_header_array->elts)[i].value.len + 2;
+    header_names_size += ((header_pair_t*) settable_header_array->elts)[i].key.len + 1;     // :
+    header_nameval_size += ((header_pair_t*) settable_header_array->elts)[i].key.len + 1;   // :
+    header_nameval_size += ((header_pair_t*) settable_header_array->elts)[i].value.len + 2; // \r\n
   }
 
-  /* make canonical headers string */
+  //
+
   header_details.canonical_header_str = ngx_palloc(pool, sizeof(ngx_str_t));
   header_details.canonical_header_str->data = ngx_palloc(pool, header_nameval_size);
 
@@ -220,12 +224,13 @@ static inline struct S3CanonicalHeaderDetails ngx_s3_auth__canonize_headers(ngx_
       i < settable_header_array->nelts;
       i++, used = buf_progress - header_details.canonical_header_str->data) {
     buf_progress = ngx_snprintf(buf_progress, header_nameval_size - used, "%V:%V\n",
-                                & ((header_pair_t*)settable_header_array->elts)[i].key,
-                                & ((header_pair_t*)settable_header_array->elts)[i].value);
+                                & ((header_pair_t*) settable_header_array->elts)[i].key,
+                                & ((header_pair_t*) settable_header_array->elts)[i].value);
   }
   header_details.canonical_header_str->len = used;
 
-  /* make signed headers */
+  //
+
   header_details.signed_header_names = ngx_palloc(pool, sizeof(ngx_str_t));
   header_details.signed_header_names->data = ngx_palloc(pool, header_names_size);
 
@@ -233,8 +238,9 @@ static inline struct S3CanonicalHeaderDetails ngx_s3_auth__canonize_headers(ngx_
       i < settable_header_array->nelts;
       i++, used = buf_progress - header_details.signed_header_names->data) {
     buf_progress = ngx_snprintf(buf_progress, header_names_size - used, "%V;",
-                                & ((header_pair_t*)settable_header_array->elts)[i].key);
+                                & ((header_pair_t*) settable_header_array->elts)[i].key);
   }
+
   used--;
   header_details.signed_header_names->len = used;
   header_details.signed_header_names->data[used] = 0;
@@ -328,7 +334,7 @@ static inline const ngx_str_t* ngx_s3_auth__canonical_url(ngx_pool_t *pool, cons
 
 static inline struct S3CanonicalRequestDetails ngx_s3_auth__make_canonical_request(ngx_pool_t *pool,
                                                                                    const ngx_http_request_t *req,
-                                                                                   const ngx_str_t *amz_date,
+                                                                                   const ngx_str_t *date,
                                                                                    const ngx_str_t *s3_endpoint) {
   struct S3CanonicalRequestDetails req_details;
   const ngx_str_t *canonical_qs = ngx_s3_auth__canonize_query_string(pool, req);
@@ -336,7 +342,7 @@ static inline struct S3CanonicalRequestDetails ngx_s3_auth__make_canonical_reque
   const struct S3CanonicalHeaderDetails canonical_headers = ngx_s3_auth__canonize_headers(
     pool,
     req,
-    amz_date,
+    date,
     request_body_hash,
     s3_endpoint);
   req_details.signed_header_names = canonical_headers.signed_header_names;

@@ -22,9 +22,24 @@ let
 
   nginx = pkgs.callPackage ./nix/nginx.nix {};
 
+  anyOutput = attrs: o: attrByPath
+    [ (head attrs) ]
+    (if (length attrs) > 1
+     then anyOutput (tail attrs) o
+     else o)
+    o;
+
+  # some derivations don't have dev output
+  # will mitigate this inconsistency with anyOutput helper
+  buildInputPkgConfig = lib.concatMapStringsSep
+    ":" (p: "${anyOutput ["dev"] p}/lib/pkgconfig/")
+    [openssl zlib pcre libxml2 libxslt gd geoip];
+  buildInputLib = lib.concatMapStringsSep
+    " -L" (p: "${p.out}/lib/")
+    [openssl zlib pcre libxml2 libxslt gd geoip];
   buildInputInclude = lib.concatMapStringsSep
-    " -I" (p: "${p.dev}/include/")
-    [openssl zlib pcre libxml2 libxslt gd];
+    " -I" (p: "${anyOutput ["dev"] p}/include/")
+    [openssl zlib pcre libxml2 libxslt gd geoip];
 
   nginxInclude = lib.concatMapStringsSep
     " -I" (p: "${nginx}/include/${p}/")
@@ -47,7 +62,12 @@ let
 
     export LANG="en_US.UTF-8"
     export NIX_PATH="nixpkgs=${nixpkgs}"
+
+    ngx_objs="$(find ${nginx}/include/objs/ -name 'ngx_*.o' | xargs)"
+    export PKG_CONFIG_PATH="${buildInputPkgConfig}"
     export CFLAGS="-g -I${cmocka}/include/ -I${buildInputInclude} -I${nginxInclude} -I$root/"
+    export LDFLAGS="-L${buildInputLib} -lcmocka -ldl -lpthread -lcrypt -lssl -lpcre -lcrypto -lGeoIP -lz -lxml2 -lxslt -lexslt -lgd $ngx_objs"
+
     export MAKEFLAGS="--no-print-directory"
 
     if [ ! -z "$PS1" ]
@@ -64,7 +84,7 @@ in stdenv.mkDerivation rec {
     nix cacert curl utillinux coreutils
     git jq tmux findutils gnumake
     exa ripgrep
-    gcc valgrind cmocka
+    gcc pkgconfig valgrind cmocka clang-analyzer
 
     minio s3cmd
     nginx
