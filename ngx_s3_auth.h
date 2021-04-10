@@ -3,7 +3,7 @@
  * This file contains the modularized source code for accepting a given HTTP
  * request as ngx_http_request_t and modifiying it to introduce the
  * Authorization header in compliance with the S3 V4 spec. The IAM access
- * key and the signing key (not to be confused with the secret key) along
+ * key and the signing key (not to be confused with the secret key, see ./tools/s3-auth-gen) along
  * with it's scope are taken as inputs.
  *
  * The actual nginx module binding code is not present in this file. This file
@@ -29,27 +29,24 @@
 #include <ngx_http.h>
 #include "ngx_s3_auth_crypto.h"
 
-#define AMZ_DATE_MAX_LEN 20
-#define STRING_TO_SIGN_LENGTH 3000
-
 typedef ngx_keyval_t header_pair_t;
 
 struct S3CanonicalRequestDetails {
   ngx_str_t *canonical_request;
   ngx_str_t *signed_header_names;
-  ngx_array_t *header_list; // list of header_pair_t
+  ngx_array_t *header_list;
 };
 
 struct S3CanonicalHeaderDetails {
   ngx_str_t *canonical_header_str;
   ngx_str_t *signed_header_names;
-  ngx_array_t *header_list; // list of header_pair_t
+  ngx_array_t *header_list;
 };
 
 struct S3SignedRequestDetails {
   const ngx_str_t *signature;
   const ngx_str_t *signed_header_names;
-  ngx_array_t *header_list; // list of header_pair_t
+  ngx_array_t *header_list;
 };
 
 static const ngx_str_t EMPTY_STRING_SHA256 = ngx_string("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -63,11 +60,27 @@ static inline char* __CHAR_PTR_U(u_char* ptr) { return (char*) ptr; }
 static inline const char* __CONST_CHAR_PTR_U(const u_char* ptr) { return (const char*) ptr; }
 
 static inline const ngx_str_t* ngx_s3_auth__compute_request_time(ngx_pool_t *pool, const time_t *timep) {
+  int size = 18; // len(date string + \0)
+  const char fmt[] = "%Y%m%dT%H%M%SZ";
+
   ngx_str_t *const t = ngx_palloc(pool, sizeof(ngx_str_t));
-  t->data = ngx_palloc(pool, AMZ_DATE_MAX_LEN);
   struct tm *tm_p = ngx_palloc(pool, sizeof(struct tm));
   gmtime_r(timep, tm_p);
-  t->len = strftime(__CHAR_PTR_U(t->data), AMZ_DATE_MAX_LEN - 1, "%Y%m%dT%H%M%SZ", tm_p);
+
+  t->data = ngx_palloc(pool, size);
+  t->len = strftime(__CHAR_PTR_U(t->data), size - 1, fmt, tm_p);
+
+  // If the length of the resulting C string, including the terminating null-character,
+  // doesn't exceed maxsize, the function returns the total number of characters copied
+  // to ptr (not including the terminating null-character).
+  // Otherwise, it returns zero, and the contents of the array pointed by ptr are indeterminate.
+  // https://www.cplusplus.com/reference/ctime/strftime/
+  while (t->len == 0) {
+    ngx_pfree(pool, t->data);
+    size *= 2;
+    t->data = ngx_palloc(pool, size);
+    t->len = strftime(__CHAR_PTR_U(t->data), size - 1, fmt, tm_p);
+  }
 
   return t;
 }
@@ -181,7 +194,7 @@ static inline struct S3CanonicalHeaderDetails ngx_s3_auth__canonize_headers(ngx_
 
   header_ptr = ngx_array_push(settable_header_array);
   header_ptr->key = HOST_HEADER;
-  header_ptr->value.len = s3_endpoint->len + 60;
+  header_ptr->value.len = s3_endpoint->len;
   header_ptr->value.data = ngx_palloc(pool, header_ptr->value.len);
   header_ptr->value.len = ngx_snprintf(
     header_ptr->value.data,
@@ -354,12 +367,16 @@ static inline const ngx_str_t* ngx_s3_auth__string_to_sign(ngx_pool_t *pool,
                                                            const ngx_str_t *key_scope,
                                                            const ngx_str_t *date,
                                                            const ngx_str_t *canonical_request_hash) {
+  const char fmt[] = "AWS4-HMAC-SHA256\n%V\n%V\n%V";
   ngx_str_t *subject = ngx_palloc(pool, sizeof(ngx_str_t));
 
-  subject->len = STRING_TO_SIGN_LENGTH;
+  subject->len = date->len
+                     + key_scope->len
+                     + canonical_request_hash->len
+                     + sizeof(fmt);
   subject->data = ngx_palloc(pool, subject->len);
   subject->len = ngx_snprintf(
-    subject->data, subject->len, "AWS4-HMAC-SHA256\n%V\n%V\n%V",
+    subject->data, subject->len, fmt,
     date, key_scope, canonical_request_hash) - subject->data ;
 
   return subject;
@@ -371,7 +388,7 @@ static inline const ngx_str_t* ngx_s3_auth__make_auth_token(ngx_pool_t *pool,
                                                             const ngx_str_t *access_key_id,
                                                             const ngx_str_t *key_scope) {
 
-  const char FMT_STRING[] = "AWS4-HMAC-SHA256 Credential=%V/%V,SignedHeaders=%V,Signature=%V";
+  const char fmt[] = "AWS4-HMAC-SHA256 Credential=%V/%V,SignedHeaders=%V,Signature=%V";
   ngx_str_t *authz;
 
   authz = ngx_palloc(pool, sizeof(ngx_str_t));
@@ -379,10 +396,10 @@ static inline const ngx_str_t* ngx_s3_auth__make_auth_token(ngx_pool_t *pool,
                    + key_scope->len
                    + signed_header_names->len
                    + signature->len
-                   + sizeof(FMT_STRING);
+                   + sizeof(fmt);
   authz->data = ngx_palloc(pool, authz->len);
   authz->len = ngx_snprintf(
-    authz->data, authz->len, FMT_STRING,
+    authz->data, authz->len, fmt,
     access_key_id, key_scope, signed_header_names, signature) - authz->data;
   return authz;
 }
