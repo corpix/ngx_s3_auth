@@ -34,8 +34,8 @@ ngx_str_t* ngx_s3_auth__hash_sha256(ngx_pool_t *pool, const ngx_str_t *blob) {
   SHA256_Update(&sha256, blob->data, blob->len);
   SHA256_Final(hash, &sha256);
 
-  retval->data = ngx_palloc(pool, SHA256_DIGEST_LENGTH * 2 + 1);
-  retval->len = SHA256_DIGEST_LENGTH * 2;
+  retval->data = ngx_palloc(pool, sizeof(hash) * 2 + 1);
+  retval->len = sizeof(hash) * 2;
   ngx_hex_dump(retval->data, hash, sizeof(hash));
   return retval;
 }
